@@ -1,0 +1,231 @@
+---
+title: "Assignment 4"
+date: "2023-12-14"
+author: "Candidate number: 23498"
+output: html_document
+---
+<style>
+body {
+text-align: justify}
+</style>
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, include = FALSE)
+library(spotifyr)
+library(tidyverse)
+library(rvest)
+library(statip)
+library(forcats)
+library(ggplot2)
+```
+
+```{r eval = FALSE}
+# scrape artist names from the rolling stones lists
+magasine_html_bottom <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446")
+magasine_html_top <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446/the-band-2-88489/")
+
+artist_names_bottom_50 <- magasine_html_bottom %>%
+    html_elements(xpath = '//*[@id="post-147446"]/div[1]/div/article/div[3]') %>% 
+    html_elements("h2") %>% 
+    html_text()
+
+artist_names_top_50 <- magasine_html_top %>%
+    html_elements(xpath = '//*[@id="post-147446"]/div[1]/div/article/div[3]') %>% 
+    html_elements("h2") %>% 
+    html_text()
+
+# add the two lists together, reverse the order of the list
+artist_names <- c(artist_names_bottom_50, artist_names_top_50) %>% 
+  rev()
+```
+
+```{r}
+# Connect to the API
+client_id <- Sys.getenv("SPOTIFY_CLIENT_ID")
+client_secret <- Sys.getenv("SPOTIFY_CLIENT_SECRET")
+
+access_token <- get_spotify_access_token(client_id, client_secret)
+
+# for each artist in the list, get the audio features
+# I sliced data into 5 slices to meet the API restrictions 
+# and ran script for one slice per day
+slice_1 <- 1:20
+slice_2 <- 21:40
+slice_3 <- 41:60
+slice_4 <- 61:80
+slice_5 <- 81:100
+
+top_artists_tracks <- data.frame()
+
+# I changed the slice in the for loop 
+for (i in slice_1){
+  tryCatch({
+    artist_tracks <- get_artist_audio_features(artist_names[i])
+    top_artists_tracks <- rbind(top_artists_tracks, artist_tracks)
+  }, error = function(e) {
+    print(paste(artist_names[i], "not found"))
+  })
+}
+
+# delete some columns and save data as a csv file
+# each of the 5 csv files corresponds to one slice
+top_artists_tracks <- top_artists_tracks %>% 
+  select(-album_images, -artists, -available_markets)
+write.csv(top_artists_tracks, "data/top_artists_tracks_1.csv", row.names = FALSE)
+
+# parliament and funkadelic not found, so I run the same code using
+# a slightly different band name
+parfun <- get_artist_audio_features("Parliament Funkadelic") %>% 
+  select(-album_images, -artists, -available_markets)
+
+# neil young not found, but I was unable to retrive the data using a different name
+# or the artist id, so I decided to leave it out
+
+# merge all data into one dataframe
+top_artists_tracks <- data.frame()
+for (i in 1:5){
+  file_path = paste0("data/top_artists_tracks_", i, ".csv")
+  current_tracks <- read_csv(file_path)
+  top_artists_tracks <- rbind(top_artists_tracks, current_tracks)
+}
+top_artists_tracks <- rbind(top_artists_tracks, parfun)
+
+# get data on artist popularity and genre
+artist_ids <- unique(top_artists_tracks$artist_id)
+top_artists_pop <- data.frame()
+for (id in artist_ids){
+  artist_pop <- get_artist(id)
+  followers <- artist_pop$followers$total
+  popularity <- artist_pop$popularity
+  genres <- list(artist_pop$genres)
+
+  artist_df <- data.frame(artist_id = id, followers = followers, popularity = popularity) %>% 
+    mutate(genres = genres)
+  top_artists_pop <- rbind(top_artists_pop, artist_df)
+}
+```
+
+```{r}
+# exclude "Neil Young" from the list of artist names
+artist_names_complete <- artist_names[!artist_names %in% c("Neil Young")]
+
+# create a name and rank dataframe
+artist_names_rank <- data.frame(artist_name = artist_names_complete, rank_2010 = 1:99)
+
+# summarise the data 
+top_artists_summary <- top_artists_tracks %>% 
+  select(artist_name, artist_id, danceability, energy, loudness, speechiness, acousticness,
+         instrumentalness, liveness, valence, tempo, duration_ms,
+         explicit, time_signature, key_name, mode_name) %>%
+  group_by(artist_name, artist_id) %>%
+  summarise(mean_danceability = mean(danceability, na.rm = TRUE),
+            mean_energy = mean(energy, na.rm = TRUE),
+            mean_loudness = mean(loudness, na.rm = TRUE),
+            mean_speechiness = mean(speechiness, na.rm = TRUE),
+            mean_acousticness = mean(acousticness, na.rm = TRUE),
+            mean_instrumentalness = mean(instrumentalness, na.rm = TRUE),
+            mean_liveness = mean(liveness, na.rm = TRUE),
+            mean_valence = mean(valence, na.rm = TRUE),
+            mean_tempo = mean(tempo, na.rm = TRUE),
+            mean_duration_ms = mean(duration_ms, na.rm = TRUE),
+            mfv_explicit = mfv1(explicit),
+            mfv_time_signature = mfv1(time_signature),
+            mfv_key_name = mfv1(key_name),
+            mfv_mode_name = mfv1(mode_name))
+
+# add rank to the summary
+top_artists_summary <- top_artists_summary %>% 
+  left_join(artist_names_rank, by = "artist_name")
+
+# check which are missing
+notmissing <- top_artists_summary %>% 
+  filter(!is.na(rank_2010))
+notmissing <- notmissing$artist_name
+
+missing <- top_artists_summary %>% 
+  filter(is.na(rank_2010))
+missing <- missing$artist_name
+
+# exclude notmissing from artist_names_complete
+artist_names_wrong <- artist_names_complete[!artist_names_complete %in% notmissing]
+
+# compare
+artist_names_wrong
+missing
+
+# correct the names
+top_artists_summary <- top_artists_summary %>% 
+  mutate(artist_name = case_when(artist_name == "2Pac" ~ "Tupac Shakur", 
+                                 artist_name == "Allman Brothers Band" ~ "The Allman Brothers Band", 
+                                 artist_name == "Bob Marley & The Wailers" ~ "Bob Marley",
+                                 artist_name == "Booker T. & the M.G.'s" ~  "Booker T. and the MGs",
+                                 artist_name == "Diana Ross & The Supremes" ~ "Diana Ross and the Supremes",
+                                 artist_name == "Four Tops" ~ "The Four Tops",
+                                 artist_name == "Guns N' Roses" ~ "Guns n’ Roses",
+                                 artist_name == "Hank Williams, Jr." ~ "Hank Williams",
+                                 artist_name == "Howlin' Wolf" ~ "Howlin’ Wolf",
+                                 artist_name == "JAY-Z" ~ "Jay-Z",
+                                 artist_name == "Parliament Funkadelic" ~ "Parliament and Funkadelic",
+                                 artist_name == "Ramones" ~ "The Ramones",
+                                 artist_name == "Run–D.M.C." ~ "Run-DMC",
+                                 artist_name == "Santana" ~ "Carlos Santana",
+                                 artist_name == "Sex Pistols" ~ "The Sex Pistols",
+                                 artist_name == "Simon & Garfunkel" ~ "Simon and Garfunkel",
+                                 artist_name == "Sly & The Family Stone" ~ "Sly and the Family Stone",
+                                 artist_name == "Smokey Robinson & The Miracles" ~ "Smokey Robinson and the Miracles",
+                                 TRUE ~ artist_name)) %>% 
+  select(-rank_2010) %>% 
+  left_join(artist_names_rank, by = "artist_name")
+
+# check which are missing
+is.na(top_artists_summary$rank_2010) %>% table()
+
+# sort ids by popularity
+most_popular <- top_artists_pop %>% 
+  select(artist_id, popularity) %>%
+  arrange(desc(popularity)) %>% 
+  mutate(rank_pop = row_number())
+
+# sort ids by followers
+most_followed <- top_artists_pop %>% 
+  select(artist_id, followers) %>%
+  arrange(desc(followers)) %>% 
+  mutate(rank_fol = row_number())
+
+# add popularity and followers to the summary
+# compute changes in rank
+top_artists_summary <- top_artists_summary %>% 
+  left_join(most_popular, by = "artist_id") %>% 
+  left_join(most_followed, by = "artist_id") %>% 
+  mutate(change_pop = rank_2010 - rank_pop,
+         change_fol = rank_2010 - rank_fol)
+```
+
+```{r}
+# Analysis
+cor(top_artists_summary$change_pop, top_artists_summary$change_fol)
+
+# barplots with position changes
+top_artists_summary %>%
+  ggplot(aes(x = fct_reorder(artist_name, change_pop), y = change_pop)) +
+  geom_bar(stat = "identity") + 
+  coord_flip() + 
+  theme_minimal()
+
+top_artists_summary %>%
+  ggplot(aes(x = fct_reorder(artist_name, change_fol), y = change_fol)) +
+  geom_bar(stat = "identity") + 
+  coord_flip() + 
+  theme_minimal()
+
+# linear model
+m_pop <- lm(change_pop ~ mean_danceability + mean_energy + mean_loudness + mean_speechiness + 
+              mean_acousticness + mean_instrumentalness + mean_liveness + mean_valence +
+              mean_tempo + mean_duration_ms + mfv_explicit, data = top_artists_summary)
+m_fol <- lm(change_fol ~ change_pop, data = top_artists_summary)
+
+summary(m_pop)
+```
+## Appendix
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE, include = TRUE}
+```
