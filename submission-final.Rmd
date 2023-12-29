@@ -1,6 +1,5 @@
 ---
 title: "Assignment 4"
-date: "2023-12-14"
 author: "Candidate number: 23498"
 output: html_document
 ---
@@ -9,17 +8,23 @@ body {
 text-align: justify}
 </style>
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, include = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, include = FALSE, output = FALSE)
 library(spotifyr)
 library(tidyverse)
 library(rvest)
 library(statip)
 library(forcats)
 library(ggplot2)
+library(jtools)
+library(RSelenium)
+library(netstat)
+library(corrplot)
+library(car)
+
 ```
 
 ```{r eval = FALSE}
-# scrape artist names from the rolling stones lists
+# Step 1: Scrape the names ------------------------------------------------
 magasine_html_bottom <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446")
 magasine_html_top <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446/the-band-2-88489/")
 
@@ -36,13 +41,17 @@ artist_names_top_50 <- magasine_html_top %>%
 # add the two lists together, reverse the order of the list
 artist_names <- c(artist_names_bottom_50, artist_names_top_50) %>% 
   rev()
+
+# save the artist list
+artist_names <- as.data.frame(artist_names)
+write.csv(artist_names, "data/artist_names.csv", row.names = FALSE)
+
 ```
 
-```{r}
-# Connect to the API
+```{r eval = FALSE}
+# Step 2: Get the Spotify data --------------------------------------------
 client_id <- Sys.getenv("SPOTIFY_CLIENT_ID")
 client_secret <- Sys.getenv("SPOTIFY_CLIENT_SECRET")
-
 access_token <- get_spotify_access_token(client_id, client_secret)
 
 # for each artist in the list, get the audio features
@@ -77,9 +86,15 @@ write.csv(top_artists_tracks, "data/top_artists_tracks_1.csv", row.names = FALSE
 parfun <- get_artist_audio_features("Parliament Funkadelic") %>% 
   select(-album_images, -artists, -available_markets)
 
+# save parliament and funkadelic data
+write.csv(parfun, "data/parfun.csv", row.names = FALSE)
+
 # neil young not found, but I was unable to retrive the data using a different name
 # or the artist id, so I decided to leave it out
 
+```
+
+```{r}
 # merge all data into one dataframe
 top_artists_tracks <- data.frame()
 for (i in 1:5){
@@ -87,7 +102,11 @@ for (i in 1:5){
   current_tracks <- read_csv(file_path)
   top_artists_tracks <- rbind(top_artists_tracks, current_tracks)
 }
+parfun <- read_csv("data/parfun.csv")
 top_artists_tracks <- rbind(top_artists_tracks, parfun)
+```
+
+```{r eval = FALSE}
 
 # get data on artist popularity and genre
 artist_ids <- unique(top_artists_tracks$artist_id)
@@ -96,22 +115,155 @@ for (id in artist_ids){
   artist_pop <- get_artist(id)
   followers <- artist_pop$followers$total
   popularity <- artist_pop$popularity
-  genres <- list(artist_pop$genres)
+  # genres <- list(artist_pop$genres)
 
-  artist_df <- data.frame(artist_id = id, followers = followers, popularity = popularity) %>% 
-    mutate(genres = genres)
+  artist_df <- data.frame(artist_id = id, followers = followers, popularity = popularity)
   top_artists_pop <- rbind(top_artists_pop, artist_df)
 }
+
+# save data
+write.csv(top_artists_pop, "data/top_artists_pop.csv", row.names = FALSE)
+
+```
+
+```{r eval = FALSE}
+# Step 3: Scrape wiki data ------------------------------------------------
+find_position <- function(html, keyword){
+  #' This function searches for a keyword within an HTML document
+  #' and returns the position of the first occurrence.
+  #'
+  #' @param html The HTML document to search within.
+  #' @param keyword The keyword to search for.
+  #'
+  #' @return The position of the first occurrence of the keyword
+  #' within the HTML document, or NA if not found.
+  
+  positions <- html %>%
+    html_elements(css = ".infobox.vcard > tbody > tr") %>%
+    html_text() %>%
+    str_detect(keyword)
+
+  tryCatch(pos <- which(positions == TRUE)[1] %>% as.character(), error = function(e) pos <- NA)
+  return(pos)
+}
+
+# load the artist list
+artist_names <- read.csv("data/artist_names.csv")
+artist_names <- artist_names$artist_names
+
+# change names to avoid confusion 
+artist_names[artist_names == "Prince"] <- "Prince (musician)"
+artist_names[artist_names == "Nirvana"] <- "Nirvana (band)"
+artist_names[artist_names == "Queen"] <- "Queen (band)"
+artist_names[artist_names == "Parliament and Funkadelic"] <- "Parliament-Funkadelic"
+artist_names[artist_names == "Cream"] <- "Cream (band)"
+artist_names[artist_names == "Eagles"] <- "Eagles (band)"
+
+# initialise the df
+genres_years <- data.frame()
+
+# start the browser
+rD <- rsDriver(browser=c("firefox"), port = free_port(random = TRUE), chromever = NULL) 
+driver <- rD$client
+driver$navigate("https://en.wikipedia.org/wiki/Main_Page")
+
+# iterate over the artist list
+for (artist in artist_names){
+  
+  # search for the artist
+  driver$findElement(using = "class name", 'cdx-text-input__input')$clearElement()
+  driver$findElement(using = "class name", 'cdx-text-input__input')$sendKeysToElement(
+    list(artist, key = "enter"))
+  Sys.sleep(2)
+  
+  # get the artist page, find the position of the "Genres" and "Years" rows
+  artist_html <- read_html(driver$getCurrentUrl()[[1]])
+  genres_pos <- find_position(artist_html, "Genres")
+  years_pos <- find_position(artist_html, "Years")
+  
+  # get the genres and years based on position
+  genres <- artist_html %>%
+        html_elements(css = paste0(".infobox.vcard > tbody > tr:nth-child(", genres_pos, ") > td > 
+                                   div > ul > li:nth-child(1)")) %>%
+        html_text()
+  if (length(genres) == 0){
+    genres <- artist_html %>%
+        html_elements(css = paste0(".infobox.vcard > tbody > tr:nth-child(", genres_pos, ") > td")) %>%
+        html_text()
+  }
+  years <- artist_html %>%
+        html_elements(css = paste0(".infobox.vcard > tbody > tr:nth-child(", years_pos, ") > td")) %>%
+        html_text()
+  
+  # add the data to the df
+  genres_years <- rbind(genres_years, c(artist, genres, years))
+}
+
+# close the browser
+driver$close()
+rD$server$stop()
+
+# change the names and clean three entries manually
+names(genres_years) <- c("artist", "genre", "year")
+genres_years$year[40] <- "1956"
+genres_years$year[60] <- "1975"
+genres_years$year[82] <- "1968"
+
+# clean the data
+genres_years_clean <- genres_years %>%
+  mutate(
+    # delete enters from year, trim,take the first four characters, turn into numeric
+    year = str_replace_all(year, "\n", "") %>% str_trim() %>% str_sub(1, 4) %>% as.numeric(),
+    # delete references and enters from genre, trim
+    genre = str_replace_all(genre, "\\[.*\\]", "") %>% str_replace_all("\n", "") %>% str_trim()) %>% 
+  # make categories for genre more general
+  mutate(genre = case_when(str_detect(genre, "Hard rock") ~ "Heavy metal",
+                           str_detect(genre, "Blues rock") ~ "Blues",
+                           str_detect(genre, "rock") ~ "Rock", 
+                           str_detect(genre, "blues") ~ "Blues",
+                           str_detect(genre, "R&B") ~ "Blues",
+                           str_detect(genre, "soul") ~ "Soul",
+                           str_detect(genre, "hip hop") ~ "Hip hop",
+                           str_detect(genre, "country") ~ "Country",
+                           str_detect(genre, "Rockabilly") ~ "Rock and roll",
+                           str_detect(genre, "punk") ~ "Punk",
+                           T ~ genre)) %>% 
+  # gather all categories with <5 entries into "Other"
+  mutate(genre = case_when(str_detect(genre, "Heavy metal") ~ "Heavy metal",
+                           str_detect(genre, "Rock") ~ "Rock",
+                           str_detect(genre, "Blues") ~ "Blues",
+                           str_detect(genre, "Soul") ~ "Soul",
+                           str_detect(genre, "Hip hop") ~ "Hip hop",
+                           str_detect(genre, "Rock and roll") ~ "Rock and roll",
+                           T ~ "Other"))
+
+# change the artist names back to original
+artist_names <- read.csv("data/artist_names.csv")
+artist_names <- artist_names$artist_names
+genres_years_clean$artist <- artist_names
+
+# write the data
+write.csv(genres_years_clean, "data/genres_years.csv", row.names = FALSE)
+
 ```
 
 ```{r}
+# Step 4: Merge data ------------------------------------------------------
+
+# load artist names, popularity and genres + years data
+artist_names <- read.csv("data/artist_names.csv")
+artist_names <- artist_names$artist_names
+top_artists_pop <- read_csv("data/top_artists_pop.csv")
+genres_years <- read_csv("data/genres_years.csv")
+
 # exclude "Neil Young" from the list of artist names
 artist_names_complete <- artist_names[!artist_names %in% c("Neil Young")]
 
 # create a name and rank dataframe
 artist_names_rank <- data.frame(artist_name = artist_names_complete, rank_2010 = 1:99)
 
-# summarise the data 
+# summarise the data by artist
+# top_artists_tracks was loaded earlier in step 2
 top_artists_summary <- top_artists_tracks %>% 
   select(artist_name, artist_id, danceability, energy, loudness, speechiness, acousticness,
          instrumentalness, liveness, valence, tempo, duration_ms,
@@ -171,13 +323,11 @@ top_artists_summary <- top_artists_summary %>%
                                  artist_name == "Sex Pistols" ~ "The Sex Pistols",
                                  artist_name == "Simon & Garfunkel" ~ "Simon and Garfunkel",
                                  artist_name == "Sly & The Family Stone" ~ "Sly and the Family Stone",
-                                 artist_name == "Smokey Robinson & The Miracles" ~ "Smokey Robinson and the Miracles",
+                                 artist_name == "Smokey Robinson & The Miracles" ~ 
+                                   "Smokey Robinson and the Miracles",
                                  TRUE ~ artist_name)) %>% 
   select(-rank_2010) %>% 
   left_join(artist_names_rank, by = "artist_name")
-
-# check which are missing
-is.na(top_artists_summary$rank_2010) %>% table()
 
 # sort ids by popularity
 most_popular <- top_artists_pop %>% 
@@ -196,35 +346,108 @@ most_followed <- top_artists_pop %>%
 top_artists_summary <- top_artists_summary %>% 
   left_join(most_popular, by = "artist_id") %>% 
   left_join(most_followed, by = "artist_id") %>% 
+  left_join(genres_years, c("artist_name" = "artist")) %>%
   mutate(change_pop = rank_2010 - rank_pop,
          change_fol = rank_2010 - rank_fol)
+
 ```
 
-```{r}
-# Analysis
-cor(top_artists_summary$change_pop, top_artists_summary$change_fol)
+```{r include = TRUE, fig.height = 12, out.width="50%"}
+# Step 5: Plot ------------------------------------------------------------
 
 # barplots with position changes
 top_artists_summary %>%
   ggplot(aes(x = fct_reorder(artist_name, change_pop), y = change_pop)) +
-  geom_bar(stat = "identity") + 
+  geom_bar(stat = "identity", fill = "coral2") + 
   coord_flip() + 
-  theme_minimal()
+  labs(x = "Artist", y = "Change in rank", title = "Changes in rank by popularity") + 
+  theme_minimal(base_size = 12, base_family = "serif") + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 
 top_artists_summary %>%
   ggplot(aes(x = fct_reorder(artist_name, change_fol), y = change_fol)) +
-  geom_bar(stat = "identity") + 
-  coord_flip() + 
-  theme_minimal()
-
-# linear model
-m_pop <- lm(change_pop ~ mean_danceability + mean_energy + mean_loudness + mean_speechiness + 
-              mean_acousticness + mean_instrumentalness + mean_liveness + mean_valence +
-              mean_tempo + mean_duration_ms + mfv_explicit, data = top_artists_summary)
-m_fol <- lm(change_fol ~ change_pop, data = top_artists_summary)
-
-summary(m_pop)
+  geom_bar(stat = "identity", fill = "steelblue") + 
+  coord_flip() +
+  labs(x = "Artist", y = "Change in rank", title = "Changes in rank by followers") +
+  theme_minimal(base_size = 12, base_family = "serif") + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 ```
+
+```{r, include = TRUE, fig.align = "center", fig.height = 6, fig.width = 6}
+
+# plot the correlation matrix
+cor_plot <- cor(top_artists_summary[, c(3:13, 23)], use = "complete.obs") %>% 
+  corrplot(type = "upper", method = "number", tl.col = "black", 
+           col=colorRampPalette(c('coral2', 'white', 'steelblue'))(200), 
+           title = "Correlation matrix of the independent variables", mar=c(0,0,2,0), number.cex = 0.75) 
+```
+
+```{r}
+
+# linear models
+m_pop <- lm(change_pop ~ mean_danceability + mean_energy + mean_speechiness +
+              mean_instrumentalness + mean_liveness + mean_valence +
+              mean_tempo + mean_duration_ms + mfv_explicit + year, data = top_artists_summary)
+m_fol <- lm(change_fol ~ mean_danceability + mean_energy + mean_speechiness +
+              mean_instrumentalness + mean_liveness + mean_valence +
+              mean_tempo + mean_duration_ms + mfv_explicit + year, data = top_artists_summary)
+
+# vif tests for multicollinearity
+vif(m_fol)
+vif(m_pop)
+
+# heteroscedasticity tests
+ncvTest(m_fol)
+ncvTest(m_pop)
+
+# variance constancy 
+plot(m_fol, 3)
+plot(m_pop, 3)
+
+# normality of residuals
+hist(residuals(m_fol))
+hist(residuals(m_pop))
+```
+
+```{r include = TRUE, fig.align = "center"}
+
+# change the names of the coefficients and their order
+coef_named = c("Mean valence" = "mean_valence", "Mean speechiness" = "mean_speechiness",
+               "Mean duration" = "mean_duration_ms", "Mean tempo" = "mean_tempo", 
+               "Mean instrumentalness" = "mean_instrumentalness", "Mean liveness" = "mean_liveness", 
+               "Mean energy" = "mean_energy", "Mean danceability" = "mean_danceability",
+               "Year" = "year", "Explicit" = "mfv_explicitTRUE")
+
+# plot the linear models
+plot_summs(m_pop, m_fol, model.names = c("Popularity", "Followers"), 
+           robust = TRUE, scale = TRUE, coefs = coef_named, colors = c('steelblue', 'coral2')) + 
+  labs(title = "Coefficient values of linear models with confidence intervals", 
+       x = "Estimate", y = "Coefficient") +
+  theme_minimal(base_size = 12, base_family = "serif") + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# calculate the position changes by genre
+genre_changes <- top_artists_summary %>% 
+  group_by(genre) %>% 
+  summarise(mean_change_pop = mean(change_pop, na.rm = TRUE),
+            mean_change_fol = mean(change_fol, na.rm = TRUE)) %>% 
+# turn to long format
+  pivot_longer(cols = c(mean_change_pop, mean_change_fol), names_to = "change_type", values_to = "change") %>% 
+  mutate(change_type = if_else(change_type == "mean_change_pop", "Popularity", "Followers"))
+
+# plot the position changes by genre
+# include both popularity and followers
+genre_changes %>% 
+  ggplot(aes(fill = change_type, y = change, x = fct_reorder(genre, change))) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  coord_flip() + 
+  labs(x = "Genre", y = "Change in rank", title = "Changes in rank by genre") + 
+  scale_fill_manual("Change type", values = c('coral2','steelblue')) +
+  theme_minimal(base_size = 12, base_family = "serif") + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+
 ## Appendix
 
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE, include = TRUE}
