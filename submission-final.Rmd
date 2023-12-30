@@ -1,6 +1,7 @@
 ---
 title: "Assignment 4"
 author: "Candidate number: 23498"
+date: "Word count: 732"
 output: html_document
 ---
 <style>
@@ -25,6 +26,7 @@ library(car)
 
 ```{r eval = FALSE}
 # Step 1: Scrape the names ------------------------------------------------
+# I set eval = FALSE for chunks I ran only once
 magasine_html_bottom <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446")
 magasine_html_top <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446/the-band-2-88489/")
 
@@ -352,6 +354,22 @@ top_artists_summary <- top_artists_summary %>%
 
 ```
 
+## Introduction
+
+The purpose of this report is to analyse how the music of the 100 greatest musical artists of all time, according to Rolling Stone Magazine, has endured over the past decade and what characteristics explain changes in popularity. The analysis is based primarily on the data from Spotify, with additional information from Wikipedia. My empirical strategy involves explaining the changes in engagement as measured by the number of followers and popularity of the artists with the characteristics of the music of that artist. I find that sadder songs, with fewer spoken words and explicit content, have endured better over the past decade, with genres such as heavy metal and hip hop gaining popularity.
+
+## Data
+
+The data used in this report comes from two sources. The first source is Spotify, which I accessed through the Spotify API. It provides information on the characteristics of each song of the artist, such as danceability, how many spoken words there are, energy, etc. I calculated the average of these indicators across all songs by artist. I also created a dummy variable indicating whether the majority of the artist's tracks contain explicit content or not. Additionally, I accessed the data on each artist's popularity and number of followers through the API and, based on this information, created new rankings which reflect the artist's current popularity. 
+
+The second source is Wikipedia, which I accessed using Selenium. It provides information on the genre of the artist (Spotify API also provides this information but the Wikipedia categories were more general and hence better suited for the analysis) and the year when they started their career. For each artist, I took the genre listed first in the information box and then changed it to a more general genre (eg. hip hop instead of political hip hop) or to a similar genre (eg. heavy metal instead of hard rock) when necessary. Hence, the genre variable is very general and does not reflect the exact musical style of the artists.
+
+The final dataset contains artist-level information about the characteristics of their music, their current popularity and number of followers, and the change in their popularity and number of followers over the past decade. It also contains information about the genre of the artist and the year when they started their career.
+
+## Analysis
+
+Figures 1 and 2 depict the changes in rank (from the 2010 Magazine ranking) as measured by popularity and number of followers by artist, respectively. They are not exactly the same since popularity takes into account people who listen to an artist's music but do not follow them, but the general trend is similar across both measures. Hip hop artists (Eminem, Jay-Z, Tupac) have become much more popular over the past decade, while 50s rock and roll artists (Little Richard, Bo Diddley, Chuck Berry) have become less popular. 
+
 ```{r include = TRUE, fig.height = 12, out.width="50%"}
 # Step 5: Plot ------------------------------------------------------------
 
@@ -360,7 +378,7 @@ top_artists_summary %>%
   ggplot(aes(x = fct_reorder(artist_name, change_pop), y = change_pop)) +
   geom_bar(stat = "identity", fill = "coral2") + 
   coord_flip() + 
-  labs(x = "Artist", y = "Change in rank", title = "Changes in rank by popularity") + 
+  labs(x = "Artist", y = "Change in rank", title = "Figure 1: Changes in rank by popularity") + 
   theme_minimal(base_size = 12, base_family = "serif") + 
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 
@@ -368,10 +386,11 @@ top_artists_summary %>%
   ggplot(aes(x = fct_reorder(artist_name, change_fol), y = change_fol)) +
   geom_bar(stat = "identity", fill = "steelblue") + 
   coord_flip() +
-  labs(x = "Artist", y = "Change in rank", title = "Changes in rank by followers") +
+  labs(x = "Artist", y = "Change in rank", title = "Figure 2: Changes in rank by followers") +
   theme_minimal(base_size = 12, base_family = "serif") + 
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 ```
+To investigate which characteristics explain these changes in popularity, I estimate linear regression models. Figure 3 shows the correlation matrix of the possible independent variables. I decided to exclude mean loudness and mean acousticness from the equations since they are strongly correlated with mean energy. I also excluded categorical variables such as genre and key to avoid high dimensionality and overfitting.         
 
 ```{r, include = TRUE, fig.align = "center", fig.height = 6, fig.width = 6}
 
@@ -379,7 +398,7 @@ top_artists_summary %>%
 cor_plot <- cor(top_artists_summary[, c(3:13, 23)], use = "complete.obs") %>% 
   corrplot(type = "upper", method = "number", tl.col = "black", 
            col=colorRampPalette(c('coral2', 'white', 'steelblue'))(200), 
-           title = "Correlation matrix of the independent variables", mar=c(0,0,2,0), number.cex = 0.75) 
+           title = "Figure 3: Correlation matrix of the independent variables", mar=c(0,0,2,0), number.cex = 0.75) 
 ```
 
 ```{r}
@@ -409,6 +428,8 @@ hist(residuals(m_fol))
 hist(residuals(m_pop))
 ```
 
+I estimate the same model twice using changes in rank as measured by popularity and the number of followers as the dependent variables. The models meet the assumptions of linear regression. Figure 4 shows the scaled coefficients of the two models with 95% confidence intervals. The models suggest artists whose tracks score high one valence and speechiness (ie. they are happy and have a lot of spoken words) have become less popular over the past decade. Moreover, artists whose majority of tracks are explicit have become more popular. Additionally, younger artists with more danceable tracks have likely become more popular - the coefficients for these variables are only marginally insignificant. The rest of the coefficients are not statistically significant. 
+
 ```{r include = TRUE, fig.align = "center"}
 
 # change the names of the coefficients and their order
@@ -421,11 +442,16 @@ coef_named = c("Mean valence" = "mean_valence", "Mean speechiness" = "mean_speec
 # plot the linear models
 plot_summs(m_pop, m_fol, model.names = c("Popularity", "Followers"), 
            robust = TRUE, scale = TRUE, coefs = coef_named, colors = c('steelblue', 'coral2')) + 
-  labs(title = "Coefficient values of linear models with confidence intervals", 
+  labs(title = "Figure 4: Coefficient values of linear models with confidence intervals", 
        x = "Estimate", y = "Coefficient") +
   theme_minimal(base_size = 12, base_family = "serif") + 
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 
+```
+
+Finally, Figure 5 depicts the average changes in rank by genre. Heavy metal and hip hop artists have become more popular, and blues and soul artists have become less popular. This pattern is consistent with the results of the linear models. Hip hop and heavy metal artists tend to have more explicit tracks, which are often sadder (hip hop artists often come from disadvantaged backgrounds). Blues and soul artists tend to be older and produce happier but less danceable tracks (they are generally quite slow).  
+
+```{r include = TRUE, fig.align = "center"}
 # calculate the position changes by genre
 genre_changes <- top_artists_summary %>% 
   group_by(genre) %>% 
@@ -441,14 +467,14 @@ genre_changes %>%
   ggplot(aes(fill = change_type, y = change, x = fct_reorder(genre, change))) +
   geom_bar(stat = "identity", position = "dodge") + 
   coord_flip() + 
-  labs(x = "Genre", y = "Change in rank", title = "Changes in rank by genre") + 
+  labs(x = "Genre", y = "Change in rank", title = "Figure 5: Changes in rank by genre") + 
   scale_fill_manual("Change type", values = c('coral2','steelblue')) +
   theme_minimal(base_size = 12, base_family = "serif") + 
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 ```
 
 
-## Appendix
+## Code Appendix
 
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE, include = TRUE}
 ```
