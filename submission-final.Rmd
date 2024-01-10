@@ -1,7 +1,7 @@
 ---
 title: "Assignment 4"
 author: "Candidate number: 23498"
-date: "Word count: 732"
+date: "Word count: 742"
 output: html_document
 ---
 <style>
@@ -27,14 +27,18 @@ library(car)
 ```{r eval = FALSE}
 # Step 1: Scrape the names ------------------------------------------------
 # I set eval = FALSE for chunks I ran only once
+
+# read the html code of the websites
 magasine_html_bottom <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446")
 magasine_html_top <- read_html("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446/the-band-2-88489/")
 
+# first 50 artists
 artist_names_bottom_50 <- magasine_html_bottom %>%
     html_elements(xpath = '//*[@id="post-147446"]/div[1]/div/article/div[3]') %>% 
     html_elements("h2") %>% 
     html_text()
 
+# last 50 artists
 artist_names_top_50 <- magasine_html_top %>%
     html_elements(xpath = '//*[@id="post-147446"]/div[1]/div/article/div[3]') %>% 
     html_elements("h2") %>% 
@@ -52,6 +56,8 @@ write.csv(artist_names, "data/artist_names.csv", row.names = FALSE)
 
 ```{r eval = FALSE}
 # Step 2: Get the Spotify data --------------------------------------------
+
+# get the access token
 client_id <- Sys.getenv("SPOTIFY_CLIENT_ID")
 client_secret <- Sys.getenv("SPOTIFY_CLIENT_SECRET")
 access_token <- get_spotify_access_token(client_id, client_secret)
@@ -67,6 +73,7 @@ slice_5 <- 81:100
 
 top_artists_tracks <- data.frame()
 
+# get the artist audio features
 # I changed the slice in the for loop 
 for (i in slice_1){
   tryCatch({
@@ -97,7 +104,7 @@ write.csv(parfun, "data/parfun.csv", row.names = FALSE)
 ```
 
 ```{r}
-# merge all data into one dataframe
+# load all data and merge into one dataframe
 top_artists_tracks <- data.frame()
 for (i in 1:5){
   file_path = paste0("data/top_artists_tracks_", i, ".csv")
@@ -110,14 +117,13 @@ top_artists_tracks <- rbind(top_artists_tracks, parfun)
 
 ```{r eval = FALSE}
 
-# get data on artist popularity and genre
+# get data on artist followers and popularity 
 artist_ids <- unique(top_artists_tracks$artist_id)
 top_artists_pop <- data.frame()
 for (id in artist_ids){
   artist_pop <- get_artist(id)
   followers <- artist_pop$followers$total
   popularity <- artist_pop$popularity
-  # genres <- list(artist_pop$genres)
 
   artist_df <- data.frame(artist_id = id, followers = followers, popularity = popularity)
   top_artists_pop <- rbind(top_artists_pop, artist_df)
@@ -130,6 +136,7 @@ write.csv(top_artists_pop, "data/top_artists_pop.csv", row.names = FALSE)
 
 ```{r eval = FALSE}
 # Step 3: Scrape wiki data ------------------------------------------------
+
 find_position <- function(html, keyword){
   #' This function searches for a keyword within an HTML document
   #' and returns the position of the first occurrence.
@@ -205,7 +212,7 @@ for (artist in artist_names){
 driver$close()
 rD$server$stop()
 
-# change the names and clean three entries manually
+# change the names and clean three year entries manually
 names(genres_years) <- c("artist", "genre", "year")
 genres_years$year[40] <- "1956"
 genres_years$year[60] <- "1975"
@@ -356,19 +363,19 @@ top_artists_summary <- top_artists_summary %>%
 
 ## Introduction
 
-The purpose of this report is to analyse how the music of the 100 greatest musical artists of all time, according to Rolling Stone Magazine, has endured over the past decade and what characteristics explain changes in popularity. The analysis is based primarily on the data from Spotify, with additional information from Wikipedia. My empirical strategy involves explaining the changes in engagement as measured by the number of followers and popularity of the artists with the characteristics of the music of that artist. I find that sadder songs, with fewer spoken words and explicit content, have endured better over the past decade, with genres such as heavy metal and hip hop gaining popularity.
+The purpose of this report is to analyse how the music of the 100 greatest musical artists of all time, according to Rolling Stone Magazine, has endured over the past decade and what characteristics explain changes in popularity. The analysis is based primarily on the data from Spotify, with additional information from Wikipedia. My empirical strategy involves explaining the changes in engagement (as measured by the number of followers and popularity of the artist) with the characteristics of the music of that artist. I find that sadder songs, with explicit content and fewer spoken words, have endured better over the past decade, with genres such as heavy metal and hip hop gaining popularity.
 
 ## Data
 
-The data used in this report comes from two sources. The first source is Spotify, which I accessed through the Spotify API. It provides information on the characteristics of each song of the artist, such as danceability, how many spoken words there are, energy, etc. I calculated the average of these indicators across all songs by artist. I also created a dummy variable indicating whether the majority of the artist's tracks contain explicit content or not. Additionally, I accessed the data on each artist's popularity and number of followers through the API and, based on this information, created new rankings which reflect the artist's current popularity. 
+The data used in this report comes from two sources. The first source is Spotify, which I accessed through the Spotify API. It provides information on the characteristics of each song of the artist, such as danceability, how many spoken words there are, energy, etc. I calculated the average of these indicators across all songs by artist. I also created a dummy variable indicating whether most of an artist’s tracks contain explicit content. Additionally, I accessed the data on each artist’s popularity and number of followers through the API and, based on this information, created new rankings which reflect the artist’s current popularity.
 
-The second source is Wikipedia, which I accessed using Selenium. It provides information on the genre of the artist (Spotify API also provides this information but the Wikipedia categories were more general and hence better suited for the analysis) and the year when they started their career. For each artist, I took the genre listed first in the information box and then changed it to a more general genre (eg. hip hop instead of political hip hop) or to a similar genre (eg. heavy metal instead of hard rock) when necessary. Hence, the genre variable is very general and does not reflect the exact musical style of the artists.
+The second source is Wikipedia, which I accessed using Selenium. It provides information on the genre of the artist (Spotify API also provides this information, but the Wikipedia categories were more general and hence better suited for the analysis) and the year when they started their career. For each artist, I took the genre listed first in the information box and then changed it to a more general genre (eg. hip hop instead of political hip hop) or to a similar genre (eg. heavy metal instead of hard rock) when necessary. Given these changes, the genre variable is very general and may not reflect the exact musical style of the artists.
 
-The final dataset contains artist-level information about the characteristics of their music, their current popularity and number of followers, and the change in their popularity and number of followers over the past decade. It also contains information about the genre of the artist and the year when they started their career.
+The final dataset contains artist-level information about the characteristics of their music, their current popularity and number of followers, and the change in their ranking over the past decade as measured by popularity and number of followers. It also contains information about the genre of the artist’s music and the year when they started their career.
 
 ## Analysis
 
-Figures 1 and 2 depict the changes in rank (from the 2010 Magazine ranking) as measured by popularity and number of followers by artist, respectively. They are not exactly the same since popularity takes into account people who listen to an artist's music but do not follow them, but the general trend is similar across both measures. Hip hop artists (Eminem, Jay-Z, Tupac) have become much more popular over the past decade, while 50s rock and roll artists (Little Richard, Bo Diddley, Chuck Berry) have become less popular. 
+Figures 1 and 2 depict the changes in rank (from the 2010 Magazine ranking) as measured by popularity and number of followers by artist, respectively. They are not precisely the same since popularity accounts for people who listen to an artist’s music but do not follow them. Nevertheless, the general trend is similar across both measures. Hip hop artists (Eminem, Jay-Z, Tupac) have become much more popular over the past decade, while 50s rock and roll artists (Little Richard, Bo Diddley, Chuck Berry) have become less popular.
 
 ```{r include = TRUE, fig.height = 12, out.width="50%"}
 # Step 5: Plot ------------------------------------------------------------
@@ -390,7 +397,7 @@ top_artists_summary %>%
   theme_minimal(base_size = 12, base_family = "serif") + 
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 ```
-To investigate which characteristics explain these changes in popularity, I estimate linear regression models. Figure 3 shows the correlation matrix of the possible independent variables. I decided to exclude mean loudness and mean acousticness from the equations since they are strongly correlated with mean energy. I also excluded categorical variables such as genre and key to avoid high dimensionality and overfitting.         
+To investigate which characteristics explain these changes in popularity, I estimated two linear regression models. Figure 3 shows the correlation matrix of the possible independent variables. I decided to exclude mean loudness and mean acousticness from the equations since they are strongly correlated with mean energy. I also excluded categorical variables such as genre and key to avoid high dimensionality and overfitting.         
 
 ```{r, include = TRUE, fig.align = "center", fig.height = 6, fig.width = 6}
 
@@ -428,7 +435,7 @@ hist(residuals(m_fol))
 hist(residuals(m_pop))
 ```
 
-I estimate the same model twice using changes in rank as measured by popularity and the number of followers as the dependent variables. The models meet the assumptions of linear regression. Figure 4 shows the scaled coefficients of the two models with 95% confidence intervals. The models suggest artists whose tracks score high one valence and speechiness (ie. they are happy and have a lot of spoken words) have become less popular over the past decade. Moreover, artists whose majority of tracks are explicit have become more popular. Additionally, younger artists with more danceable tracks have likely become more popular - the coefficients for these variables are only marginally insignificant. The rest of the coefficients are not statistically significant. 
+I estimated the same model twice using changes in rank as measured by popularity and the number of followers as the dependent variables. The models meet the assumptions of linear regression. Figure 4 shows the scaled coefficients of the two models with 95% confidence intervals. The coefficients suggest artists whose tracks score high one valence and speechiness (ie. are happy and have a lot of spoken words) have become less popular over the past decade. Moreover, artists whose majority of tracks are explicit have become more popular. Additionally, younger artists with more danceable tracks have likely become more popular - the coefficients for these variables are only marginally insignificant. The rest of the coefficients are not statistically significant. 
 
 ```{r include = TRUE, fig.align = "center"}
 
@@ -449,7 +456,7 @@ plot_summs(m_pop, m_fol, model.names = c("Popularity", "Followers"),
 
 ```
 
-Finally, Figure 5 depicts the average changes in rank by genre. Heavy metal and hip hop artists have become more popular, and blues and soul artists have become less popular. This pattern is consistent with the results of the linear models. Hip hop and heavy metal artists tend to have more explicit tracks, which are often sadder (hip hop artists often come from disadvantaged backgrounds). Blues and soul artists tend to be older and produce happier but less danceable tracks (they are generally quite slow).  
+Finally, Figure 5 depicts the average changes in rank by genre. Heavy metal and hip hop artists have become more popular, and blues and soul artists have become less popular. This pattern is consistent with the results of the linear models. Hip hop and heavy metal artists tend to have more explicit tracks, which are often sadder (hip hop artists often come from disadvantaged backgrounds, which their music reflects). Blues and soul artists tend to be older and produce happier but less danceable tracks (they are generally quite slow).  
 
 ```{r include = TRUE, fig.align = "center"}
 # calculate the position changes by genre
